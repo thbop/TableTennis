@@ -35,6 +35,8 @@ typedef unsigned char u8;
 #define WINWIDTH  WINRATIO*WIDTH
 #define WINHEIGHT WINRATIO*HEIGHT
 
+#define UISELECT (Color){ 219, 65, 97, 255 }
+
 #define TABLEHEIGHT 5
 #define TABLECENTER (Vector2){ 0.0f, 97.0f }
 
@@ -52,6 +54,12 @@ typedef unsigned char u8;
 
 #define PLAYERACC 0.1;
 
+struct {
+    u8 screen;     // 0 = menu, 1 = game
+    u8 difficulty; // 0 = easy, 1 = normal, 2 = hard
+    u8 score, score_com;
+} state;
+
 typedef struct {
     Texture2D tex;
     int frame, frametick;
@@ -61,8 +69,9 @@ typedef struct {
 
 // Globals
 RenderTexture2D screen;
-Texture2D background, table, table_mask;
+Texture2D background, table, table_mask, menu;
 Shader shadow_shader;
+Sound sfx_bounce, sfx_bounce_table, sfx_hit, sfx_select, sfx_click;
 int table_mask_loc;
 paddle player;
 
@@ -98,6 +107,8 @@ void ball_init() {
 //     };
 // }
 
+int sfx_hit_timer = 0;
+
 void ball_hit_paddle(paddle p, int dir) {
     Rectangle hit = RECPLUSXY(PLAYERHIT, p.pos);
     if ( p.frame >= PADDLEHITFRAME && p.frame <= PADDLEMAXFRAME ) { // If can hit
@@ -106,8 +117,10 @@ void ball_hit_paddle(paddle p, int dir) {
             // printf("%f\n", ball.vel.x);
             ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 0.5f;
             ball.vel.y *= dir;
+            if ( !sfx_hit_timer ) { PlaySound(sfx_hit); sfx_hit_timer = 16; }
         }
     }
+    if (sfx_hit_timer) sfx_hit_timer--;
 }
 
 void ball_move() {
@@ -117,15 +130,19 @@ void ball_move() {
     else ball.floor_z = 0.0f;
 
     // Floor Bounce
-    if ( ball.pos.z <= ball.floor_z ) { ball.pos.z = ball.floor_z; ball.vel.z = -ball.vel.z; }
+    if ( ball.pos.z <= ball.floor_z ) {
+        ball.pos.z = ball.floor_z; ball.vel.z = -ball.vel.z;
+        if ( ball.floor_z ) PlaySound(sfx_bounce_table);
+        else                PlaySound(sfx_bounce);
+    }
     else if ( ball.vel.z > -3.0f ) ball.vel.z -= 0.02;
 
     // Ceiling
     if ( ball.pos.z > 15.0f ) ball.pos.z = 15.0f;
 
     // Wall Bounce
-    if ( fabsf(ball.pos.x) >= 45.0f )                  ball.vel.x = -ball.vel.x;
-    if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) ball.vel.y = -ball.vel.y;
+    if ( fabsf(ball.pos.x) >= 45.0f )                  { ball.vel.x = -ball.vel.x; PlaySound(sfx_bounce); }
+    if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) { ball.vel.y = -ball.vel.y; PlaySound(sfx_bounce); }
 
     // Paddle Bounce
     ball_hit_paddle(player, -1);
@@ -182,7 +199,7 @@ void player_move() {
     player.pos = Vector2Add( player.pos, player.vel );
 
     // printf("%f\n", player.pos.x);
-    if      ( player.pos.x > 155.0f ) { player.vel.x = -player.vel.x*0.5f; player.pos.x = 155.0f; }
+    if      ( player.pos.x > 160.0f ) { player.vel.x = -player.vel.x*0.5f; player.pos.x = 160.0f; }
     else if ( player.pos.x < -15.0f ) { player.vel.x = -player.vel.x*0.5f; player.pos.x = -15.0f; }
 
     if ( IsKeyPressed(KEY_SPACE) ) {
@@ -196,16 +213,32 @@ void player_move() {
 
 void Init() {
     InitWindow(WINWIDTH, WINHEIGHT, "Table Tennis!");
+    InitAudioDevice();
     SetTargetFPS(FPS);
 
-    screen = LoadRenderTexture(WIDTH, HEIGHT);
-    background = LoadTexture("graphics/background.png");
-    table = LoadTexture("graphics/table.png");
-    table_mask = LoadTexture("graphics/table_mask.png");
+    // State
+    state.screen = 0;
+    state.difficulty = 1;
+    state.score = state.score_com = 0;
 
-    shadow_shader = LoadShader(0, "shadow.glsl");
+    // Background graphics
+    screen     = LoadRenderTexture(WIDTH, HEIGHT);
+    background = LoadTexture("graphics/background.png");
+    table      = LoadTexture("graphics/table.png");
+    table_mask = LoadTexture("graphics/table_mask.png");
+    menu       = LoadTexture("graphics/menu.png");
+
+    shadow_shader  = LoadShader(0, "shadow.glsl");
     table_mask_loc = GetShaderLocation(shadow_shader, "mask");
 
+    // Sounds
+    sfx_bounce       = LoadSound("audio/bounce.wav");
+    sfx_bounce_table = LoadSound("audio/bounce_table.wav");
+    sfx_hit          = LoadSound("audio/hit.wav");
+    sfx_select       = LoadSound("audio/select.wav");
+    sfx_click        = LoadSound("audio/click.wav");
+
+    // Game objects
     ball_init();
     player_init();
 
@@ -217,13 +250,37 @@ void Unload() {
     UnloadTexture(background);
     UnloadTexture(table);
     UnloadTexture(table_mask);
+    UnloadTexture(menu);
     UnloadShader(shadow_shader);
+
+    UnloadSound(sfx_bounce);
+    UnloadSound(sfx_bounce_table);
+    UnloadSound(sfx_hit);
+    UnloadSound(sfx_select);
+    UnloadSound(sfx_click);
+
+    CloseAudioDevice();
     CloseWindow();
 }
 
 void Update() {
-    ball_move();
-    player_move();
+    switch ( state.screen ) {
+        case 0: { // Menu
+            if ( IsKeyPressed(KEY_SPACE) ) {
+                state.difficulty++;
+                state.difficulty %= 3;
+                PlaySound(sfx_select);
+            }
+            if ( IsKeyPressed(KEY_ENTER) ) { state.screen = 1; PlaySound(sfx_click); }
+            break;
+        }
+        case 1: { // Game
+            ball_move();
+            player_move();
+            break;
+        }
+    }
+    
     // printf("%f\n", ball.pos.x);
 
     // if (IsKeyDown(KEY_RIGHT)) a+=0.5f;
@@ -233,25 +290,39 @@ void Update() {
 
 
 void Draw() {
-    DrawTexture(background, 0, 0, WHITE);
+    switch ( state.screen ) {
+        case 0: { // Menu
+            DrawTexture(menu, 0, 0, WHITE);
 
-    DrawCircleV(ball_project(1, 0), ball.radius, BLACK);
-    DrawTexture(table, 0, 0, WHITE);
-    
-    BeginShaderMode(shadow_shader);
-        SetShaderValueTexture(shadow_shader, table_mask_loc, table_mask);
-        DrawCircleV(ball_project(1, 5), ball.radius, BLACK);
-        // DrawRectangle(0, 0, HALFWIDTH, HEIGHT, WHITE);
-    EndShaderMode();
+            DrawText("Difficulty", 70, 90, 10, WHITE);
+                DrawText("Easy", 60, 100, 10, state.difficulty == 0 ? UISELECT : WHITE);
+                DrawText("Normal", 60, 110, 10, state.difficulty == 1 ? UISELECT : WHITE);
+                DrawText("Hard", 60, 120, 10, state.difficulty == 2 ? UISELECT : WHITE);
+            break;
+        }
+        case 1: { // Game
+            DrawTexture(background, 0, 0, WHITE);
+            DrawCircleV(ball_project(1, 0), ball.radius, BLACK);
+            DrawTexture(table, 0, 0, WHITE);
+            
+            BeginShaderMode(shadow_shader);
+                SetShaderValueTexture(shadow_shader, table_mask_loc, table_mask);
+                DrawCircleV(ball_project(1, 5), ball.radius, BLACK);
+                // DrawRectangle(0, 0, HALFWIDTH, HEIGHT, WHITE);
+            EndShaderMode();
 
-    DrawCircleV(ball.project, ball.radius, BALLCOLOR);
-    // Vector2 a = ball_project(0);
-    // printf("%f\n", a.y);
+            DrawCircleV(ball.project, ball.radius, BALLCOLOR);
+            // Vector2 a = ball_project(0);
+            // printf("%f\n", a.y);
 
-    // DrawLineV( project((Vector3){a, 45.0f, 0.0f}), project((Vector3){a, WIDTH, 0.0f}), GREEN );
+            // DrawLineV( project((Vector3){a, 45.0f, 0.0f}), project((Vector3){a, WIDTH, 0.0f}), GREEN );
 
-    paddle_animate(&player);
-    // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
+            paddle_animate(&player);
+            // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
+            break;
+        }
+    }
+
 }
 
 
