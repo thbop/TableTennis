@@ -2,3 +2,5 @@
 /.vscode
 Makefile
 *.exe
+/graphics/paddle-frames
+*.blend1
