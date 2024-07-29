@@ -14,6 +14,7 @@ Vector3 Vector3MultiplyValue(Vector3 p, float v) {
 }
 
 // Typedefs
+typedef          char i8;
 typedef unsigned char u8;
 
 // Defines and globals
@@ -25,31 +26,49 @@ typedef unsigned char u8;
 #define WINWIDTH  WINRATIO*WIDTH
 #define WINHEIGHT WINRATIO*HEIGHT
 
+#define BALLCOLOR (Color){ 235, 235, 235, 255 }
+
 struct {
     Vector3 pos, vel;
+    Vector2 projected_shadow;
     float radius;
 } ball;
 
-Vector2 ball_project(u8 shadow, u8 overtable) {
+Vector2 ball_project(u8 shadow) {
     return (Vector2){
-        fabsf( 0.4f*ball.pos.y ) * ball.pos.x + HALFWIDTH,
-        ball.pos.y - (shadow ? overtable : ball.pos.z)
+        fabsf( 0.28f*ball.pos.y+24 ) * ball.pos.x * 0.03 + HALFWIDTH,
+        ball.pos.y - (shadow ? 0.0f : ball.pos.z)
     };
 }
 
+// Vector2 project(Vector3 p, u8 shadow, u8 overtable) {
+//     return (Vector2){
+//         (fabsf( 0.28f*p.y+24 ) * p.x * 0.03f + HALFWIDTH),
+//         p.y - (shadow ? overtable : p.z)
+//     };
+// }
+
+
 void ball_move() {
-    if ( ball.pos.z <= 0.0f ) {
-        ball.vel.z = -ball.vel.z;
-    }
-    else if ( ball.vel.z > -2.0f ) ball.vel.z -= 0.01;
+    // Project
+    ball.projected_shadow = ball_project(1);
+
+    // Floor Bounce
+    if ( ball.pos.z <= 0.0f ) ball.vel.z = -ball.vel.z;
+    else if ( ball.vel.z > -3.0f ) ball.vel.z -= 0.02;
+
+    // Wall Bounce
+    if ( fabsf(ball.pos.x) >= 45.0f )                  ball.vel.x = -ball.vel.x;
+    if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) ball.vel.y = -ball.vel.y;
 
     ball.pos = Vector3Add(ball.pos, ball.vel);
     // Vector2MultiplyValue(ball.vel, 0.99f);
 }
 
 void ball_init() {
-    ball.pos = (Vector3){ 0.0f, 100.0f, 10.0f };
-    ball.vel = (Vector3){ 0.0f, 0.0f, 0.0f };
+    ball.pos = (Vector3){ 10.0f, 100.0f, 10.0f };
+    ball.vel = (Vector3){ 0.2f, 0.2f, 0.0f };
+    ball.projected_shadow = ball_project(1);
 
     ball.radius = 3.0f;
 }
@@ -77,14 +96,19 @@ void Unload() {
 
 void Update() {
     ball_move();
+    // printf("%f\n", ball.pos.x);
 }
 
 
 void Draw() {
     DrawTexture(background, 0, 0, WHITE);
+
     DrawTexture(table, 0, 0, WHITE);
-    DrawCircleV(ball_project(1, 0), ball.radius, BLACK);
-    DrawCircleV(ball_project(0, 0), ball.radius, WHITE);
+    
+    DrawCircleV(ball.projected_shadow, ball.radius, BLACK);
+    DrawCircleV(ball_project(0), ball.radius, BALLCOLOR);
+
+    // DrawLineV( project((Vector3){45.0f, 45.0f, 0.0f}, 1, 0), project((Vector3){45.0f, WIDTH, 0.0f}, 1, 0), GREEN );
 }
 
 
