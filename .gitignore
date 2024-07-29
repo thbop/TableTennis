@@ -4,3 +4,4 @@ Makefile
 *.exe
 /graphics/paddle-frames
 *.blend1
+/graphics/player-paddle

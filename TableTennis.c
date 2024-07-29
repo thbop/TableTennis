@@ -10,6 +10,9 @@
 // }
 
 #define GETXY(p) (Vector2){ p.x, p.y }
+#define XYTOXYZ(p, z) (Vector3){ p.x, p.y, z }
+#define RECPLUSXY(r, p) (Rectangle){ r.x + p.x, r.y + p.y, r.width, r.height }
+//#define QUICKFDIV2(f) (float)((long)f>>1)
 
 Vector3 Vector3MultiplyValue(Vector3 p, float v) {
     return (Vector3){ p.x * v, p.y * v, p.z * v };
@@ -33,26 +36,59 @@ typedef unsigned char u8;
 #define WINHEIGHT WINRATIO*HEIGHT
 
 #define TABLEHEIGHT 5
+#define TABLECENTER (Vector2){ 0.0f, 97.0f }
 
 #define BALLCOLOR (Color){ 235, 235, 235, 255 }
 
 #define PADDLETEXDIM     48.0f
 #define PADDLEMAXFRAME   9
 #define PADDLEFRAMEDELAY 1
+#define PADDLEHITFRAME   3
+#define PLAYERHIT        (Rectangle){ 10.0f, 16.0f, 25.0f, 20.0f }
+#define PLAYERHITHALFW   PLAYERHIT.width/2
+
+// Hit line
+// origin ----------- extend offset
 
 #define PLAYERACC 0.1;
+
+typedef struct {
+    Texture2D tex;
+    int frame, frametick;
+    u8 animate;
+    Vector2 pos, vel;
+} paddle;
+
+// Globals
+RenderTexture2D screen;
+Texture2D background, table, table_mask;
+Shader shadow_shader;
+int table_mask_loc;
+paddle player;
 
 // Ball
 struct {
     Vector3 pos, vel;
+    Vector2 project;
     float floor_z, radius;
 } ball;
+
+
 
 Vector2 ball_project(u8 shadow, u8 shadow_offset) {
     return (Vector2){
         fabsf( 0.28f*ball.pos.y+24 ) * ball.pos.x * 0.03 + HALFWIDTH,
         ball.pos.y - (shadow ?  shadow_offset : ball.pos.z)
     };
+}
+
+void ball_init() {
+    ball.pos = XYTOXYZ(TABLECENTER, 10.0f);
+    ball.vel = (Vector3){ 0.1f, 0.5f, 0.0f };
+    ball.project = ball_project(1, 0);
+
+    ball.floor_z = 0.0f;
+    ball.radius = 3.0f;
 }
 
 // Vector2 project(Vector3 p) {
@@ -62,8 +98,20 @@ Vector2 ball_project(u8 shadow, u8 shadow_offset) {
 //     };
 // }
 
+void ball_hit_paddle(paddle p, int dir) {
+    Rectangle hit = RECPLUSXY(PLAYERHIT, p.pos);
+    if ( p.frame >= PADDLEHITFRAME && p.frame <= PADDLEMAXFRAME ) { // If can hit
+        if ( CheckCollisionPointRec( ball.project, hit ) ) {
+            ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width*2.5 );
+            // printf("%f\n", ball.vel.x);
+            ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 0.5f;
+            ball.vel.y *= dir;
+        }
+    }
+}
 
 void ball_move() {
+    ball.project = ball_project(0, 0);
     if ( ball.pos.x < 25.0f && ball.pos.x > -23.5f && ball.pos.y < 129.0f && ball.pos.y > 65.5f )
          ball.floor_z = TABLEHEIGHT;
     else ball.floor_z = 0.0f;
@@ -79,27 +127,16 @@ void ball_move() {
     if ( fabsf(ball.pos.x) >= 45.0f )                  ball.vel.x = -ball.vel.x;
     if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) ball.vel.y = -ball.vel.y;
 
+    // Paddle Bounce
+    ball_hit_paddle(player, -1);
+
     ball.pos = Vector3Add(ball.pos, ball.vel);
     // Vector2MultiplyValue(ball.vel, 0.99f);
-
 }
 
-void ball_init() {
-    ball.pos = (Vector3){ 10.0f, 100.0f, 10.0f };
-    ball.vel = (Vector3){ 0.2f, 0.2f, 0.0f };
 
-    ball.floor_z = 0.0f;
-    ball.radius = 3.0f;
-}
 
 // Paddles
-typedef struct {
-    Texture2D tex;
-    int frame, frametick;
-    u8 animate;
-    Vector2 pos, vel;
-} paddle;
-
 paddle paddle_init( char* texFileName, Vector2 pos ) {
     paddle p;
     p.tex = LoadTexture(texFileName);
@@ -130,11 +167,10 @@ void paddle_unload(paddle p) {
 }
 
 // Player
-paddle player;
 void player_init() {
     player = paddle_init(
         "graphics/player_paddle.png",
-        (Vector2){ 100.0f, 110.0f }
+        (Vector2){ 100.0f, 100.0f }
     );
 }
 
@@ -155,10 +191,6 @@ void player_move() {
 }
 
 
-RenderTexture2D screen;
-Texture2D background, table, table_mask;
-Shader shadow_shader;
-int table_mask_loc;
 
 // float a;
 
@@ -212,13 +244,14 @@ void Draw() {
         // DrawRectangle(0, 0, HALFWIDTH, HEIGHT, WHITE);
     EndShaderMode();
 
-    DrawCircleV(ball_project(0, 0), ball.radius, BALLCOLOR);
+    DrawCircleV(ball.project, ball.radius, BALLCOLOR);
     // Vector2 a = ball_project(0);
     // printf("%f\n", a.y);
 
     // DrawLineV( project((Vector3){a, 45.0f, 0.0f}), project((Vector3){a, WIDTH, 0.0f}), GREEN );
 
     paddle_animate(&player);
+    // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
 }
 
 
