@@ -66,6 +66,8 @@ struct {
     u8 illegal_bounce, end;
     u8 score, score_com;
     int wait, ball_wait;
+    u8 crt;
+    int time;
 } state;
 
 typedef struct {
@@ -78,10 +80,10 @@ typedef struct {
 // Globals
 RenderTexture2D screen;
 Texture2D background, table, table_mask, menu;
-Shader shadow_shader;
 Sound sfx_bounce, sfx_bounce_table, sfx_hit, sfx_select, sfx_click;
 Music game_music;
-int table_mask_loc;
+Shader shadow_shader, crt_shader;
+int table_mask_loc, time_loc;
 paddle player, com;
 
 int enter_blink_tick;
@@ -126,7 +128,7 @@ void ball_hit_paddle(paddle p, int dir) {
     Rectangle hit = RECPLUSXY(PLAYERHIT, p.pos);
     if ( p.frame >= PADDLEHITFRAME && p.frame <= PADDLEMAXFRAME ) { // If can hit
         if ( CheckCollisionPointRec( ball.project, hit ) ) {
-            ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width*2.5 );
+            ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width*1.5f );
             // printf("%f\n", ball.vel.x);
             ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 1.0f;
             ball.vel.y *= dir;
@@ -318,18 +320,21 @@ void Init() {
     InitWindow(WINWIDTH, WINHEIGHT, "Table Tennis!");
     InitAudioDevice();
     SetTargetFPS(FPS);
+    HideCursor();
 
     // State
     state.screen         = 0;
     state.difficulty     = 1;
-    state.score          =
+    state.score          =   // Yes, I probably could use memset
     state.score_com      =
     state.illegal_bounce =
     state.end            =
     state.bounces        =
     state.bounces_com    =
     state.wait           = 
-    state.ball_wait      = 0;
+    state.ball_wait      =
+    state.crt            =
+    state.time           = 0;
 
     // Background graphics
     screen     = LoadRenderTexture(WIDTH, HEIGHT);
@@ -338,8 +343,11 @@ void Init() {
     table_mask = LoadTexture("graphics/table_mask.png");
     menu       = LoadTexture("graphics/menu.png");
 
-    shadow_shader  = LoadShader(0, "shadow.glsl");
+    shadow_shader  = LoadShader(0, "shaders/shadow.glsl");
     table_mask_loc = GetShaderLocation(shadow_shader, "mask");
+
+    crt_shader  = LoadShader(0, "shaders/crt.glsl");
+    time_loc    = GetShaderLocation(crt_shader, "time");
 
     // Sounds
     sfx_bounce       = LoadSound("audio/bounce.wav");
@@ -365,7 +373,9 @@ void Unload() {
     UnloadTexture(table);
     UnloadTexture(table_mask);
     UnloadTexture(menu);
+
     UnloadShader(shadow_shader);
+    UnloadShader(crt_shader);
 
     UnloadSound(sfx_bounce);
     UnloadSound(sfx_bounce_table);
@@ -382,6 +392,10 @@ void Unload() {
 }
 
 void Update() {
+    if ( IsKeyPressed(KEY_C) ) state.crt = !state.crt;
+    if ( state.time < 3600 ) state.time++;
+    else                     state.time = 0;
+
     if ( state.wait ) state.wait--;
     else {
         switch ( state.screen ) {
@@ -480,7 +494,6 @@ void Draw() {
             break;
         }
     }
-
 }
 
 
@@ -497,12 +510,14 @@ int main() {
         EndTextureMode();
 
         BeginDrawing();
+            if ( state.crt ) { BeginShaderMode(crt_shader); SetShaderValue(crt_shader, time_loc, &state.time, SHADER_UNIFORM_INT); }
             DrawTexturePro(
                 screen.texture,
                 (Rectangle){ 0.0f, 0.0f, WIDTH, -HEIGHT },
                 (Rectangle){ 0.0f, 0.0f, WINWIDTH, WINHEIGHT },
                 (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE
             );
+            if ( state.crt ) EndShaderMode();
         EndDrawing();
     }
 

@@ -1,6 +1,6 @@
 #version 330
 // Input vertex attributes (from vertex shader)
-in vec2 fragTexCoord;
+// in vec2 fragTexCoord;
 // in vec4 fragColor;
 
 // Input uniform values
