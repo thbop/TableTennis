@@ -50,16 +50,20 @@ typedef unsigned char u8;
 #define PLAYERHIT        (Rectangle){ 10.0f, 16.0f, 25.0f, 20.0f }
 #define PLAYERHITHALFW   PLAYERHIT.width/2
 
+#define WINSCORE 21
+
+#define ENTERBLINKSPEED 20
+
 // Hit line
 // origin ----------- extend offset
 
 #define PADDLEACC 0.1;
 
 struct {
-    u8 screen;     // 0 = menu, 1 = game
+    u8 screen;     // 0 = menu, 1 = game, 2 = end
     u8 difficulty; // 0 = easy, 1 = normal, 2 = hard
     u8 bounces, bounces_com;
-    u8 illegal_bounce;
+    u8 illegal_bounce, end;
     u8 score, score_com;
     int wait, ball_wait;
 } state;
@@ -79,6 +83,9 @@ Sound sfx_bounce, sfx_bounce_table, sfx_hit, sfx_select, sfx_click;
 Music game_music;
 int table_mask_loc;
 paddle player, com;
+
+int enter_blink_tick;
+u8  enter_blink;
 
 // Ball
 struct {
@@ -124,6 +131,8 @@ void ball_hit_paddle(paddle p, int dir) {
             ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 1.0f;
             ball.vel.y *= dir;
             if ( !sfx_hit_timer ) { PlaySound(sfx_hit); sfx_hit_timer = 30; }
+
+            state.bounces = state.bounces_com = 0;
         }
     }
     if (sfx_hit_timer) sfx_hit_timer--;
@@ -229,7 +238,7 @@ void player_move() {
 void com_init() {
     com = paddle_init(
         "graphics/com_paddle.png",
-        (Vector2){ 100.0f, 45.0f }
+        (Vector2){ 100.0f, 47.0f }
     );
 }
 
@@ -240,7 +249,7 @@ void com_move() {
             if ( hit.x+hit.width-3 < ball.project.x ) com.vel.x += PADDLEACC;
             if ( hit.x+3 > ball.project.x )           com.vel.x -= PADDLEACC;
 
-            if ( ball.project.y - hit.y+hit.height < 30.0f && !com.animate ) com.animate = 1;
+            if ( ball.project.y - hit.y+hit.height < 29.0f && !com.animate ) com.animate = 1;
             break;
         }
     }
@@ -274,6 +283,33 @@ void score_update() {
         ball_move();
         state.ball_wait = 30;
     }
+
+    if ( !state.end && (state.score >= WINSCORE || state.score_com >= WINSCORE) ) {
+        if ( !state.wait ) state.wait = 120;
+        state.end = 1;
+    }
+    if ( state.end && !state.wait ) state.screen = 2;
+}
+
+void reset() {
+    state.screen = 0;
+
+    ball.pos   = XYTOXYZ(TABLECENTER, 10.0f);
+    ball.vel   = (Vector3){ 0.0f, 1.0f, 0.0f };
+    player.pos = (Vector2){ 100.0f, 100.0f };
+    player.vel = (Vector2){ 0.0f, 0.0f };
+    com.pos    = (Vector2){ 100.0f, 47.0f };
+    com.vel    = (Vector2){ 0.0f, 0.0f };
+
+    state.ball_wait   =
+    state.end         =
+    state.score       =
+    state.score_com   =
+    state.bounces     =
+    state.bounces_com = 0;
+
+    StopMusicStream(game_music);
+    PlayMusicStream(game_music);
 }
 
 // float a;
@@ -288,7 +324,8 @@ void Init() {
     state.difficulty     = 1;
     state.score          =
     state.score_com      =
-    state.illegal_bounce = 
+    state.illegal_bounce =
+    state.end            =
     state.bounces        =
     state.bounces_com    =
     state.wait           = 
@@ -312,7 +349,7 @@ void Init() {
     sfx_click        = LoadSound("audio/click.wav");
     game_music       = LoadMusicStream("audio/music.wav");
 
-    
+    enter_blink_tick = enter_blink = 0;
 
     // Game objects
     ball_init();
@@ -363,7 +400,7 @@ void Update() {
                 break;
             }
             case 1: { // Game
-                UpdateMusicStream(game_music);
+                if (!state.end) UpdateMusicStream(game_music);
 
                 if ( state.ball_wait ) state.ball_wait--;
                 else ball_move();
@@ -373,6 +410,16 @@ void Update() {
 
                 score_update();
                 break;
+            }
+            case 2: { // End
+                if ( enter_blink_tick < ENTERBLINKSPEED ) enter_blink_tick++;
+                else { enter_blink_tick = 0; enter_blink = !enter_blink; }
+
+                if ( IsKeyPressed(KEY_ENTER) ) {
+                    PlaySound(sfx_click);
+                    // Reset
+                    reset();
+                }
             }
         }
     }
@@ -421,6 +468,15 @@ void Draw() {
             paddle_animate(&player);
             
             // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
+            break;
+        }
+        case 2: {
+            if ( state.score > state.score_com ) DrawText("YOU WIN!", 55, 70, 20, WHITE);
+            if ( state.score < state.score_com ) DrawText("COM WIN!", 55, 70, 20, WHITE);
+
+            DrawText(TextFormat("YOU %02d  COM %02d", state.score, state.score_com), 60, 95, 10, WHITE);
+
+            if ( enter_blink ) DrawText( "[ENTER]", 80, 105, 10, WHITE );
             break;
         }
     }
