@@ -39,6 +39,7 @@ typedef unsigned char u8;
 
 #define TABLEHEIGHT 5
 #define TABLECENTER (Vector2){ 0.0f, 97.0f }
+#define NET3DPOSY   93.0f
 
 #define BALLCOLOR (Color){ 235, 235, 235, 255 }
 
@@ -52,12 +53,15 @@ typedef unsigned char u8;
 // Hit line
 // origin ----------- extend offset
 
-#define PLAYERACC 0.1;
+#define PADDLEACC 0.1;
 
 struct {
     u8 screen;     // 0 = menu, 1 = game
     u8 difficulty; // 0 = easy, 1 = normal, 2 = hard
+    u8 bounces, bounces_com;
+    u8 illegal_bounce;
     u8 score, score_com;
+    int wait, ball_wait;
 } state;
 
 typedef struct {
@@ -72,8 +76,9 @@ RenderTexture2D screen;
 Texture2D background, table, table_mask, menu;
 Shader shadow_shader;
 Sound sfx_bounce, sfx_bounce_table, sfx_hit, sfx_select, sfx_click;
+Music game_music;
 int table_mask_loc;
-paddle player;
+paddle player, com;
 
 // Ball
 struct {
@@ -86,18 +91,9 @@ struct {
 
 Vector2 ball_project(u8 shadow, u8 shadow_offset) {
     return (Vector2){
-        fabsf( 0.28f*ball.pos.y+24 ) * ball.pos.x * 0.03 + HALFWIDTH,
+        fabsf( 0.28f*ball.pos.y+24 ) * ball.pos.x * 0.03f + HALFWIDTH,
         ball.pos.y - (shadow ?  shadow_offset : ball.pos.z)
     };
-}
-
-void ball_init() {
-    ball.pos = XYTOXYZ(TABLECENTER, 10.0f);
-    ball.vel = (Vector3){ 0.1f, 0.5f, 0.0f };
-    ball.project = ball_project(1, 0);
-
-    ball.floor_z = 0.0f;
-    ball.radius = 3.0f;
 }
 
 // Vector2 project(Vector3 p) {
@@ -107,6 +103,16 @@ void ball_init() {
 //     };
 // }
 
+void ball_init() {
+    ball.pos = XYTOXYZ(TABLECENTER, 10.0f);
+    ball.vel = (Vector3){ 0.0f, 1.0f, 0.0f };
+    ball.project = ball_project(1, 0);
+
+    ball.floor_z = 0.0f;
+    ball.radius = 3.0f;
+}
+
+
 int sfx_hit_timer = 0;
 
 void ball_hit_paddle(paddle p, int dir) {
@@ -115,9 +121,9 @@ void ball_hit_paddle(paddle p, int dir) {
         if ( CheckCollisionPointRec( ball.project, hit ) ) {
             ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width*2.5 );
             // printf("%f\n", ball.vel.x);
-            ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 0.5f;
+            ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 1.0f;
             ball.vel.y *= dir;
-            if ( !sfx_hit_timer ) { PlaySound(sfx_hit); sfx_hit_timer = 16; }
+            if ( !sfx_hit_timer ) { PlaySound(sfx_hit); sfx_hit_timer = 30; }
         }
     }
     if (sfx_hit_timer) sfx_hit_timer--;
@@ -132,20 +138,28 @@ void ball_move() {
     // Floor Bounce
     if ( ball.pos.z <= ball.floor_z ) {
         ball.pos.z = ball.floor_z; ball.vel.z = -ball.vel.z;
-        if ( ball.floor_z ) PlaySound(sfx_bounce_table);
-        else                PlaySound(sfx_bounce);
+        if ( ball.floor_z ) {
+            PlaySound(sfx_bounce_table);
+            if ( ball.pos.y > NET3DPOSY ) state.bounces++;
+            else                          state.bounces_com++;
+        }
+        else {
+            PlaySound(sfx_bounce);
+            state.illegal_bounce = 1;
+        }
     }
-    else if ( ball.vel.z > -3.0f ) ball.vel.z -= 0.02;
+    else if ( ball.vel.z > -3.0f ) ball.vel.z -= 0.05;
 
     // Ceiling
     if ( ball.pos.z > 15.0f ) ball.pos.z = 15.0f;
 
     // Wall Bounce
-    if ( fabsf(ball.pos.x) >= 45.0f )                  { ball.vel.x = -ball.vel.x; PlaySound(sfx_bounce); }
-    if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) { ball.vel.y = -ball.vel.y; PlaySound(sfx_bounce); }
+    if ( fabsf(ball.pos.x) >= 45.0f )                  { ball.vel.x = -ball.vel.x; PlaySound(sfx_bounce); state.illegal_bounce = 1; }
+    if ( ball.pos.y <= 45.0f || ball.pos.y >= HEIGHT ) { ball.vel.y = -ball.vel.y; PlaySound(sfx_bounce); state.illegal_bounce = 1; }
 
     // Paddle Bounce
     ball_hit_paddle(player, -1);
+    ball_hit_paddle(com, 1);
 
     ball.pos = Vector3Add(ball.pos, ball.vel);
     // Vector2MultiplyValue(ball.vel, 0.99f);
@@ -179,6 +193,15 @@ void paddle_animate(paddle* p) {
     );
 }
 
+void paddle_move(paddle* p) {
+    p->vel.x *= 0.98f;
+    p->pos = Vector2Add( p->pos, p->vel );
+
+    // printf("%f\n", p->pos.x);
+    if      ( p->pos.x > 165.0f ) { p->vel.x = -p->vel.x*0.5f; p->pos.x = 165.0f; }
+    else if ( p->pos.x < -15.0f ) { p->vel.x = -p->vel.x*0.5f; p->pos.x = -15.0f; }
+}
+
 void paddle_unload(paddle p) {
     UnloadTexture(p.tex);
 }
@@ -192,22 +215,66 @@ void player_init() {
 }
 
 void player_move() {
-    if ( IsKeyDown(KEY_D) ) player.vel.x += PLAYERACC;
-    if ( IsKeyDown(KEY_A) ) player.vel.x -= PLAYERACC;
+    if ( IsKeyDown(KEY_D) ) player.vel.x += PADDLEACC;
+    if ( IsKeyDown(KEY_A) ) player.vel.x -= PADDLEACC;
 
-    player.vel.x *= 0.98f;
-    player.pos = Vector2Add( player.pos, player.vel );
-
-    // printf("%f\n", player.pos.x);
-    if      ( player.pos.x > 160.0f ) { player.vel.x = -player.vel.x*0.5f; player.pos.x = 160.0f; }
-    else if ( player.pos.x < -15.0f ) { player.vel.x = -player.vel.x*0.5f; player.pos.x = -15.0f; }
+    paddle_move(&player);
 
     if ( IsKeyPressed(KEY_SPACE) ) {
         player.animate = 1;
     }
 }
 
+// Com
+void com_init() {
+    com = paddle_init(
+        "graphics/com_paddle.png",
+        (Vector2){ 100.0f, 45.0f }
+    );
+}
 
+void com_move() {
+    Rectangle hit = RECPLUSXY(PLAYERHIT, com.pos);
+    switch ( state.difficulty ) {
+        case 0: { // Easy
+            if ( hit.x+hit.width-3 < ball.project.x ) com.vel.x += PADDLEACC;
+            if ( hit.x+3 > ball.project.x )           com.vel.x -= PADDLEACC;
+
+            if ( ball.project.y - hit.y+hit.height < 30.0f && !com.animate ) com.animate = 1;
+            break;
+        }
+    }
+    paddle_move(&com);
+}
+
+// Scoring
+void score_draw() {
+    DrawText(TextFormat("YOU %02d  COM %02d", state.score, state.score_com), 60, 13, 10, WHITE);
+}
+
+void score_update() {
+    if ( state.illegal_bounce ) {
+        int dir = 1;
+        if ( state.bounces && state.bounces_com ) {
+            if ( ball.pos.y > NET3DPOSY ) { state.score_com++; dir = 1; }
+            else                          { state.score++; dir = -1; }
+        }
+        if      ( state.bounces && !state.bounces_com ) { state.score_com++; dir = 1; }
+        else if ( !state.bounces && state.bounces_com ) { state.score++; dir = -1; }
+
+        
+        // Reset
+        if ( dir == 1 ) { state.bounces = 0; state.bounces_com = 1; }
+        else            { state.bounces = 1; state.bounces_com = 0; }
+        state.illegal_bounce = 0;
+
+        ball.pos = XYTOXYZ(TABLECENTER, 10.0f);
+        ball.vel = (Vector3){ 0.0f, 1.0f*dir, 0.0f };
+
+        ball_move();
+        state.ball_wait = 30;
+    }
+}
 
 // float a;
 
@@ -217,9 +284,15 @@ void Init() {
     SetTargetFPS(FPS);
 
     // State
-    state.screen = 0;
-    state.difficulty = 1;
-    state.score = state.score_com = 0;
+    state.screen         = 0;
+    state.difficulty     = 1;
+    state.score          =
+    state.score_com      =
+    state.illegal_bounce = 
+    state.bounces        =
+    state.bounces_com    =
+    state.wait           = 
+    state.ball_wait      = 0;
 
     // Background graphics
     screen     = LoadRenderTexture(WIDTH, HEIGHT);
@@ -237,10 +310,14 @@ void Init() {
     sfx_hit          = LoadSound("audio/hit.wav");
     sfx_select       = LoadSound("audio/select.wav");
     sfx_click        = LoadSound("audio/click.wav");
+    game_music       = LoadMusicStream("audio/music.wav");
+
+    
 
     // Game objects
     ball_init();
     player_init();
+    com_init();
 
     // a = 0.0f;
 }
@@ -258,26 +335,45 @@ void Unload() {
     UnloadSound(sfx_hit);
     UnloadSound(sfx_select);
     UnloadSound(sfx_click);
+    UnloadMusicStream(game_music);
+
+    paddle_unload(player);
+    paddle_unload(com);
 
     CloseAudioDevice();
     CloseWindow();
 }
 
 void Update() {
-    switch ( state.screen ) {
-        case 0: { // Menu
-            if ( IsKeyPressed(KEY_SPACE) ) {
-                state.difficulty++;
-                state.difficulty %= 3;
-                PlaySound(sfx_select);
+    if ( state.wait ) state.wait--;
+    else {
+        switch ( state.screen ) {
+            case 0: { // Menu
+                if ( IsKeyPressed(KEY_SPACE) ) {
+                    state.difficulty++;
+                    state.difficulty %= 3;
+                    PlaySound(sfx_select);
+                }
+                if ( IsKeyPressed(KEY_ENTER) ) {
+                    state.screen = 1;
+                    state.wait   = 10;
+                    PlaySound(sfx_click);
+                    PlayMusicStream(game_music);
+                }
+                break;
             }
-            if ( IsKeyPressed(KEY_ENTER) ) { state.screen = 1; PlaySound(sfx_click); }
-            break;
-        }
-        case 1: { // Game
-            ball_move();
-            player_move();
-            break;
+            case 1: { // Game
+                UpdateMusicStream(game_music);
+
+                if ( state.ball_wait ) state.ball_wait--;
+                else ball_move();
+
+                player_move();
+                com_move();
+
+                score_update();
+                break;
+            }
         }
     }
     
@@ -295,13 +391,16 @@ void Draw() {
             DrawTexture(menu, 0, 0, WHITE);
 
             DrawText("Difficulty", 70, 90, 10, WHITE);
-                DrawText("Easy", 60, 100, 10, state.difficulty == 0 ? UISELECT : WHITE);
-                DrawText("Normal", 60, 110, 10, state.difficulty == 1 ? UISELECT : WHITE);
-                DrawText("Hard", 60, 120, 10, state.difficulty == 2 ? UISELECT : WHITE);
+                DrawText("Easy", 80, 100, 10, state.difficulty == 0 ? UISELECT : WHITE);
+                DrawText("Normal", 80, 110, 10, state.difficulty == 1 ? UISELECT : WHITE);
+                DrawText("Hard", 80, 120, 10, state.difficulty == 2 ? UISELECT : WHITE);
+            
             break;
         }
         case 1: { // Game
             DrawTexture(background, 0, 0, WHITE);
+            score_draw();
+
             DrawCircleV(ball_project(1, 0), ball.radius, BLACK);
             DrawTexture(table, 0, 0, WHITE);
             
@@ -311,13 +410,16 @@ void Draw() {
                 // DrawRectangle(0, 0, HALFWIDTH, HEIGHT, WHITE);
             EndShaderMode();
 
+            paddle_animate(&com);
             DrawCircleV(ball.project, ball.radius, BALLCOLOR);
             // Vector2 a = ball_project(0);
             // printf("%f\n", a.y);
 
             // DrawLineV( project((Vector3){a, 45.0f, 0.0f}), project((Vector3){a, WIDTH, 0.0f}), GREEN );
+            // DrawCircleV( project((Vector3){0.0f, a, 5.0f}), 2.0f, GREEN );
 
             paddle_animate(&player);
+            
             // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
             break;
         }
