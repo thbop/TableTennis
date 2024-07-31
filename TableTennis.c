@@ -22,6 +22,21 @@ Vector2 Vector2MultiplyValue(Vector2 p, float v) {
     return (Vector2){ p.x * v, p.y * v };
 }
 
+float Q_rsqrt( float number ) {
+    // Don't ask, watch this: https://youtu.be/p8u_k2LIZyo?si=n8mRBL3u3PjkUHsR
+    long i;
+    float x2, y;
+    
+    x2 = number * 0.5f;
+    y = number;
+    i = *( long* ) &y;
+    i = 0x5F3759DF - ( i >> 1 );
+    y = *(float*) &i;
+    y *= ( 1.5f - ( x2 * y*y ) );
+
+    return y;
+}
+
 // Typedefs
 typedef          char i8;
 typedef unsigned char u8;
@@ -57,7 +72,7 @@ typedef unsigned char u8;
 // Hit line
 // origin ----------- extend offset
 
-#define PADDLEACC 0.1;
+#define PADDLEACC 0.1f
 
 struct {
     u8 screen;     // 0 = menu, 1 = game, 2 = end
@@ -105,12 +120,12 @@ Vector2 ball_project(u8 shadow, u8 shadow_offset) {
     };
 }
 
-// Vector2 project(Vector3 p) {
-//     return (Vector2){
-//         (fabsf( 0.28f*p.y+24 ) * p.x * 0.03f + HALFWIDTH),
-//         p.y
-//     };
-// }
+Vector2 project(Vector3 p) {
+    return (Vector2){
+        (fabsf( 0.28f*p.y+24 ) * p.x * 0.03f + HALFWIDTH),
+        p.y
+    };
+}
 
 void ball_init() {
     ball.pos = XYTOXYZ(TABLECENTER, 10.0f);
@@ -128,7 +143,7 @@ void ball_hit_paddle(paddle p, int dir) {
     Rectangle hit = RECPLUSXY(PLAYERHIT, p.pos);
     if ( p.frame >= PADDLEHITFRAME && p.frame <= PADDLEMAXFRAME ) { // If can hit
         if ( CheckCollisionPointRec( ball.project, hit ) ) {
-            ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width*1.5f );
+            ball.vel.x = ( ball.project.x - PLAYERHITHALFW - hit.x ) / ( hit.width );
             // printf("%f\n", ball.vel.x);
             ball.vel.y = ( ball.project.y - hit.y ) / ( hit.height * 5.0f ) + 1.0f;
             ball.vel.y *= dir;
@@ -248,11 +263,35 @@ void com_move() {
     Rectangle hit = RECPLUSXY(PLAYERHIT, com.pos);
     switch ( state.difficulty ) {
         case 0: { // Easy
-            if ( hit.x+hit.width-3 < ball.project.x ) com.vel.x += PADDLEACC;
-            if ( hit.x+3 > ball.project.x )           com.vel.x -= PADDLEACC;
+            if ( hit.x+hit.width-1 < ball.project.x ) com.vel.x += PADDLEACC;
+            if ( hit.x+1 > ball.project.x )           com.vel.x -= PADDLEACC;
 
-            if ( ball.project.y - hit.y+hit.height < 29.0f && !com.animate ) com.animate = 1;
+            if ( ball.project.y - hit.y+hit.height < 35.0f && !com.animate ) com.animate = 1;
             break;
+        }
+        case 1: { // Normal
+            if ( ball.vel.y < 0.0f ) {
+                float rmag = Q_rsqrt( ball.vel.x*ball.vel.x + ball.vel.y*ball.vel.y );
+                Vector3
+                    // target      = { 25.0f, 128.0f, 5.0f },
+                    balldir     = { ball.vel.x*rmag, ball.vel.y*rmag, 0.0f },
+                    ball_impact = Vector3Add( Vector3MultiplyValue( balldir, ball.pos.y-com.pos.y ), ball.pos );
+
+                Vector2 projected_ball_impact = project(ball_impact);
+                // DrawCircleV( (Vector2){ projected_ball_impact.x, com.pos.y }, 3.0f, RED );
+
+                if ( fabsf(com.vel.x) < 0.5f ) {
+                    if ( hit.x+hit.width-2 < projected_ball_impact.x ) com.vel.x += PADDLEACC;
+                    if ( hit.x+2 > projected_ball_impact.x )           com.vel.x -= PADDLEACC;
+                }
+                else com.vel.x += copysignf(PADDLEACC, -com.vel.x);
+
+                if ( ball.project.y - hit.y+hit.height < 40.0f && !com.animate ) com.animate = 1;
+            }
+            else {
+                if ( hit.x+hit.width-1 < 100.0f ) com.vel.x += PADDLEACC;
+                if ( hit.x+1 > 100.0f )           com.vel.x -= PADDLEACC;
+            }
         }
     }
     paddle_move(&com);
@@ -314,13 +353,15 @@ void reset() {
     PlayMusicStream(game_music);
 }
 
-// float a;
+// Vector3 cursor;
 
 void Init() {
     InitWindow(WINWIDTH, WINHEIGHT, "Table Tennis!");
     InitAudioDevice();
     SetTargetFPS(FPS);
     HideCursor();
+
+    // cursor = (Vector3){ 0.0f, 100.0f, 5.0f };
 
     // State
     state.screen         = 0;
@@ -423,6 +464,12 @@ void Update() {
                 com_move();
 
                 score_update();
+
+                // if ( IsKeyDown(KEY_RIGHT) ) cursor.x++;
+                // if ( IsKeyDown(KEY_LEFT) ) cursor.x--;
+                // if ( IsKeyDown(KEY_DOWN) ) cursor.y++;
+                // if ( IsKeyDown(KEY_UP) ) cursor.y--;
+                // printf("CURSOR %f %f\n", cursor.x, cursor.y);
                 break;
             }
             case 2: { // End
@@ -444,7 +491,6 @@ void Update() {
     // if (IsKeyDown(KEY_LEFT)) a-=0.5f;
     // printf("%f\n", a);
 }
-
 
 void Draw() {
     switch ( state.screen ) {
@@ -480,6 +526,10 @@ void Draw() {
             // DrawCircleV( project((Vector3){0.0f, a, 5.0f}), 2.0f, GREEN );
 
             paddle_animate(&player);
+
+            // com_move(); // TEMP
+
+            // DrawCircleV( project(cursor), 3.0f, GREEN );
             
             // DrawRectangleLinesEx(RECPLUSXY(PLAYERHIT, player.pos), 1.0f, GREEN);
             break;
