@@ -263,13 +263,6 @@ void com_move() {
     Rectangle hit = RECPLUSXY(PLAYERHIT, com.pos);
     switch ( state.difficulty ) {
         case 0: { // Easy
-            if ( hit.x+hit.width-1 < ball.project.x ) com.vel.x += PADDLEACC;
-            if ( hit.x+1 > ball.project.x )           com.vel.x -= PADDLEACC;
-
-            if ( ball.project.y - hit.y+hit.height < 35.0f && !com.animate ) com.animate = 1;
-            break;
-        }
-        case 1: { // Normal
             if ( ball.vel.y < 0.0f ) {
                 float rmag = Q_rsqrt( ball.vel.x*ball.vel.x + ball.vel.y*ball.vel.y );
                 Vector3
@@ -279,6 +272,45 @@ void com_move() {
 
                 Vector2 projected_ball_impact = project(ball_impact);
                 // DrawCircleV( (Vector2){ projected_ball_impact.x, com.pos.y }, 3.0f, RED );
+
+                if ( fabsf(com.vel.x) < 0.5f ) {
+                    if ( hit.x+hit.width-2 < projected_ball_impact.x ) com.vel.x += PADDLEACC;
+                    if ( hit.x+2 > projected_ball_impact.x )           com.vel.x -= PADDLEACC;
+                }
+                else com.vel.x += copysignf(PADDLEACC, -com.vel.x);
+
+                if ( ball.project.y - hit.y+hit.height < 40.0f && !com.animate ) com.animate = 1;
+            }
+            else {
+                if ( hit.x+hit.width-1 < 100.0f ) com.vel.x += PADDLEACC;
+                if ( hit.x+1 > 100.0f )           com.vel.x -= PADDLEACC;
+            }
+        }
+        case 1: { // Normal
+            if ( hit.x+hit.width-1 < ball.project.x ) com.vel.x += PADDLEACC;
+            if ( hit.x+1 > ball.project.x )           com.vel.x -= PADDLEACC;
+
+            if ( ball.project.y - hit.y+hit.height < 35.0f && !com.animate ) com.animate = 1;
+            break;
+        }
+        case 2: { // Hard
+            if ( ball.vel.y < 0.0f ) {
+                float rmag = Q_rsqrt( ball.vel.x*ball.vel.x + ball.vel.y*ball.vel.y );
+                Vector3
+                    target      = { 25.0f, 128.0f, 5.0f },
+                    balldir     = { ball.vel.x*rmag, ball.vel.y*rmag, 0.0f },
+                    ball_impact = Vector3Add( Vector3MultiplyValue( balldir, ball.pos.y-com.pos.y ), ball.pos );
+
+                Vector2 projected_ball_impact = project(ball_impact);
+                // DrawCircleV( (Vector2){ projected_ball_impact.x, com.pos.y }, 3.0f, RED );
+
+                Vector3 aimdir = Vector3Subtract( target, ball_impact );
+                rmag = Q_rsqrt( aimdir.x*aimdir.x + aimdir.y*aimdir.y );
+                aimdir = Vector3MultiplyValue( aimdir, rmag );
+
+                // float aim_x = ball.pos.x - (hit.width*aimdir.x) - PLAYERHITHALFW;
+                // printf("%f\n", aim_x);
+                // DrawCircleV( (Vector2){ aimdir.x+ball.project.x, com.pos.y+20 }, 3.0f, BLUE );
 
                 if ( fabsf(com.vel.x) < 0.5f ) {
                     if ( hit.x+hit.width-2 < projected_ball_impact.x ) com.vel.x += PADDLEACC;
